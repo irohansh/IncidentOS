@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "ignoreDeprecations": "6.0",
+    "outDir": "dist",
+    "rootDir": "src",
+    "plugins": []
+  },
+  "include": [
+    "src/agents/**/*",
+    "src/lib/**/*",
+    "src/prompts/**/*",
+    "src/types/**/*",
+    "src/webhook/**/*",
+    "src/orchestrator.ts",
+    "src/tests/**/*"
+  ],
+  "exclude": ["src/app/**/*", "src/dashboard/**/*", "node_modules", "dist"]
+}
