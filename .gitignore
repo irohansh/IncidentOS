@@ -1,3 +1,6 @@
+# Project spec — contains build instructions and internal architecture
+CLAUDE.md
+
 # Environment — NEVER commit real credentials
 .env
 .env.local
