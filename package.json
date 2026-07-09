@@ -7,9 +7,9 @@
     "build": "tsc -p tsconfig.server.json && next build",
     "build:api": "tsc -p tsconfig.server.json",
     "build:dashboard": "next build",
-    "dev": "ts-node src/webhook/server.ts",
+    "dev": "ts-node --project tsconfig.server.json src/webhook/server.ts",
     "dashboard": "next dev -p 3001",
-    "test:run": "ts-node src/tests/run-test.ts"
+    "test:run": "ts-node --project tsconfig.server.json src/tests/run-test.ts"
   },
   "keywords": [],
   "author": "",

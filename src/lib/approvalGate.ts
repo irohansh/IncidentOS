@@ -3,8 +3,6 @@ import type { RunbookStep } from '../types/incident';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-const APPROVAL_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
-
 export interface ApprovalResult {
   decision: 'approved' | 'rejected' | 'timeout';
   decided_by?: string;
@@ -17,16 +15,25 @@ export async function requestApproval(
   stepId: string,
   step: RunbookStep
 ): Promise<ApprovalResult> {
+  // Test mode: skip DB and immediately approve without blocking
+  if (process.env.TEST_AUTO_APPROVE === 'true') {
+    console.log(`[approvalGate] TEST_AUTO_APPROVE — auto-approving step ${step.step_number}`);
+    return { decision: 'approved', decided_by: 'test-runner', decided_at: new Date().toISOString() };
+  }
+
+  const timeoutMs = parseInt(process.env.APPROVAL_TIMEOUT_MS ?? String(5 * 60 * 1000), 10);
+  const timeoutSeconds = Math.floor(timeoutMs / 1000);
+
   // Insert the approval request
   await pool.query(
     `INSERT INTO approval_requests
      (incident_id, step_id, timeout_seconds)
      VALUES ($1, $2, $3)`,
-    [incidentId, stepId, 300]
+    [incidentId, stepId, timeoutSeconds]
   );
 
-  // Poll every 3 seconds for up to APPROVAL_TIMEOUT_MS
-  const deadline = Date.now() + APPROVAL_TIMEOUT_MS;
+  // Poll every 3 seconds for up to timeoutMs
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(3000);
     const result = await pool.query(
@@ -43,8 +50,7 @@ export async function requestApproval(
 
   // Timeout — update the record and return
   await pool.query(
-    `UPDATE approval_requests
-     SET decision = 'timeout', decided_at = NOW()
+    `UPDATE approval_requests SET decision = 'timeout', decided_at = NOW()
      WHERE incident_id = $1 AND step_id = $2`,
     [incidentId, stepId]
   );

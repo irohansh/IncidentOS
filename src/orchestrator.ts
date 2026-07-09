@@ -7,7 +7,7 @@ import { runValidator } from './agents/validator';
 import { runPostmortem } from './agents/postmortem';
 import { requestApproval } from './lib/approvalGate';
 import { fetchMetrics } from './lib/metricsClient';
-import { postCommsToSlack, createGithubIssue } from './lib/mcpClient';
+import { postCommsToSlack, createGithubIssue, fetchRecentDeploys } from './lib/mcpClient';
 import {
   saveIncident,
   saveTriage,
@@ -58,7 +58,7 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   // ── Step 2: Root Cause + Comms in parallel ─────────────────────────────────
   console.log(`[orchestrator] Running Root Cause + Comms in parallel`);
   const [rootCause, comms] = await Promise.all([
-    runRootCause(state, []),
+    fetchRecentDeploys(alert.affected_services ?? []).then(deps => runRootCause(state, deps)),
     runComms(state, {
       company_name: process.env.COMPANY_NAME ?? 'Acme',
       product_name: process.env.PRODUCT_NAME ?? 'Platform',
@@ -132,9 +132,9 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
       );
     }
 
-    await sleep(2000);
+    await sleep(parseInt(process.env.METRICS_INITIAL_DELAY_MS ?? '2000', 10));
     const metricsBefore = await fetchMetrics(alert.affected_services ?? []);
-    await sleep(30000);
+    await sleep(parseInt(process.env.METRICS_SAMPLE_DELAY_MS ?? '30000', 10));
     const metricsAfter = await fetchMetrics(alert.affected_services ?? []);
 
     const validation = await runValidator(state, execResult, step, metricsBefore, metricsAfter);

@@ -43,6 +43,8 @@ export interface MetricsSnapshot {
   memory_usage_percent?: number;
   pod_restart_count?: number;
   db_connection_pool_usage?: number;
+  grafana_active_alerts?: number;
+  grafana_annotations?: string[];
   custom: Record<string, number>;
 }
 

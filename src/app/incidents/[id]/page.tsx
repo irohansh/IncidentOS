@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, use } from 'react';
 
 interface Incident {
   incident_id: string; title: string; severity: string; status: string;
@@ -104,18 +104,19 @@ function ApprovalPanel({ step, approval, onDecide }: {
   );
 }
 
-export default function IncidentDetailPage({ params }: { params: { id: string } }) {
+export default function IncidentDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const [data, setData] = useState<IncidentDetail | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     try {
-      const d = await fetchDetail(params.id);
+      const d = await fetchDetail(id);
       setData(d);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [params.id]);
+  }, [id]);
 
   useEffect(() => {
     load();

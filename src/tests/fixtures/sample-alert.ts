@@ -1,7 +1,7 @@
 import type { AlertPayload } from '../../types/incident';
 
 export const sampleAlert: AlertPayload = {
-  incident_id: 'INC-2024-001',
+  incident_id: `INC-${Date.now()}`,
   title: 'P0: checkout-service error rate exceeded 90% — orders failing',
   alert_source: 'pagerduty',
   severity_hint: 'critical',

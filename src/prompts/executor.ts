@@ -16,6 +16,19 @@ A JSON object with:
 - incident: IncidentState (full context)
 - approved_step: RunbookStep (the exact step that was approved)
 - previous_step_result?: ExecutorOutput (result of the previous step, for context)
+- real_execution_result?: object (present only when the command was actually run on the host)
+  - If blocked: { blocked: true, blocked_reason: string } — safety filter prevented execution
+  - If executed: { stdout, stderr, exit_code, duration_ms, success } — real command output
+
+## When real_execution_result is provided
+The command has already been run. Your job is to analyze the output and report accurately:
+1. Set command_executed to approved_step.command exactly.
+2. Copy stdout, stderr, exit_code, duration_ms, success from real_execution_result directly.
+3. Write action_taken as a clear human-readable description of what happened.
+4. Set next_step_recommendation based on the actual stdout/stderr content.
+5. If real_execution_result.blocked is true: set success=false, exit_code=1,
+   next_step_recommendation="escalate", and explain the block in action_taken.
+Do NOT invent or modify the execution output when real_execution_result is present.
 
 ## Execution approach
 Before executing:

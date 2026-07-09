@@ -153,3 +153,12 @@ export async function getPostmortem(incidentId: string) {
   );
   return result.rows[0] ?? null;
 }
+
+export async function getAllApprovals(incidentId: string): Promise<ApprovalRow[]> {
+  const result = await pool.query<ApprovalRow>(
+    `SELECT ar.* FROM approval_requests ar
+     WHERE ar.incident_id = $1 ORDER BY ar.requested_at`,
+    [incidentId]
+  );
+  return result.rows;
+}
