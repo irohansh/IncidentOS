@@ -3,7 +3,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS vector;
 
 -- Core incident record
-CREATE TABLE incidents (
+CREATE TABLE IF NOT EXISTS incidents (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT UNIQUE NOT NULL,
   title TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE incidents (
 );
 
 -- All agent call logs
-CREATE TABLE agent_logs (
+CREATE TABLE IF NOT EXISTS agent_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   agent_role TEXT NOT NULL,
@@ -34,7 +34,7 @@ CREATE TABLE agent_logs (
 );
 
 -- Triage agent output
-CREATE TABLE incident_triage (
+CREATE TABLE IF NOT EXISTS incident_triage (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   severity TEXT NOT NULL,
@@ -47,7 +47,7 @@ CREATE TABLE incident_triage (
 );
 
 -- Root cause hypotheses
-CREATE TABLE incident_hypotheses (
+CREATE TABLE IF NOT EXISTS incident_hypotheses (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   rank INTEGER NOT NULL,
@@ -59,7 +59,7 @@ CREATE TABLE incident_hypotheses (
 );
 
 -- Runbook steps selected and their status
-CREATE TABLE incident_runbook_steps (
+CREATE TABLE IF NOT EXISTS incident_runbook_steps (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   step_number INTEGER NOT NULL,
@@ -78,7 +78,7 @@ CREATE TABLE incident_runbook_steps (
 );
 
 -- Human approval queue
-CREATE TABLE approval_requests (
+CREATE TABLE IF NOT EXISTS approval_requests (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   step_id UUID NOT NULL REFERENCES incident_runbook_steps(id),
@@ -90,7 +90,7 @@ CREATE TABLE approval_requests (
 );
 
 -- Comms drafts
-CREATE TABLE incident_comms (
+CREATE TABLE IF NOT EXISTS incident_comms (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   audience TEXT NOT NULL CHECK (audience IN ('internal','customer','executive','status_page')),
@@ -100,7 +100,7 @@ CREATE TABLE incident_comms (
 );
 
 -- Validator results per action
-CREATE TABLE incident_validations (
+CREATE TABLE IF NOT EXISTS incident_validations (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   step_id UUID NOT NULL REFERENCES incident_runbook_steps(id),
@@ -113,7 +113,7 @@ CREATE TABLE incident_validations (
 );
 
 -- Final postmortem
-CREATE TABLE incident_postmortems (
+CREATE TABLE IF NOT EXISTS incident_postmortems (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   incident_id TEXT NOT NULL REFERENCES incidents(incident_id),
   timeline JSONB NOT NULL,
@@ -128,9 +128,9 @@ CREATE TABLE incident_postmortems (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Indexes
-CREATE INDEX idx_incidents_status ON incidents(status);
-CREATE INDEX idx_incidents_severity ON incidents(severity);
-CREATE INDEX idx_agent_logs_incident ON agent_logs(incident_id);
-CREATE INDEX idx_runbook_steps_incident ON incident_runbook_steps(incident_id);
-CREATE INDEX idx_approval_requests_incident ON approval_requests(incident_id);
+-- Indexes (IF NOT EXISTS so re-runs are safe)
+CREATE INDEX IF NOT EXISTS idx_incidents_status ON incidents(status);
+CREATE INDEX IF NOT EXISTS idx_incidents_severity ON incidents(severity);
+CREATE INDEX IF NOT EXISTS idx_agent_logs_incident ON agent_logs(incident_id);
+CREATE INDEX IF NOT EXISTS idx_runbook_steps_incident ON incident_runbook_steps(incident_id);
+CREATE INDEX IF NOT EXISTS idx_approval_requests_incident ON approval_requests(incident_id);

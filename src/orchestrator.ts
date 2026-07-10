@@ -18,6 +18,7 @@ import {
   saveValidation,
   savePostmortem,
 } from './lib/incidentStore';
+import { logger } from './lib/logger';
 import type {
   AlertPayload,
   IncidentState,
@@ -44,7 +45,7 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   addEvent(`Alert received: ${alert.title}`, 'system', 'detection');
 
   // ── Step 1: Triage ─────────────────────────────────────────────────────────
-  console.log(`[orchestrator] Running Triage for ${alert.incident_id}`);
+  logger.info('Running Triage', { incident_id: alert.incident_id });
   const metrics = await fetchMetrics(alert.affected_services ?? []);
   state.triage = await runTriage(alert, metrics);
   addEvent(
@@ -56,14 +57,14 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   await saveTriage(alert.incident_id, state.triage);
 
   // ── Step 2: Root Cause + Comms in parallel ─────────────────────────────────
-  console.log(`[orchestrator] Running Root Cause + Comms in parallel`);
+  logger.info('Running Root Cause + Comms in parallel', { incident_id: alert.incident_id });
   const [rootCause, comms] = await Promise.all([
-    fetchRecentDeploys(alert.affected_services ?? []).then(deps => runRootCause(state, deps)),
+    fetchRecentDeploys(alert.affected_services ?? []).then((deps) => runRootCause(state, deps)),
     runComms(state, {
-      company_name: process.env.COMPANY_NAME ?? 'Acme',
-      product_name: process.env.PRODUCT_NAME ?? 'Platform',
+      company_name:    process.env.COMPANY_NAME ?? 'Acme',
+      product_name:    process.env.PRODUCT_NAME ?? 'Platform',
       status_page_url: process.env.STATUS_PAGE_URL ?? '',
-      support_email: process.env.SUPPORT_EMAIL ?? '',
+      support_email:   process.env.SUPPORT_EMAIL ?? '',
     }),
   ]);
   state.root_cause = rootCause;
@@ -75,12 +76,12 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
 
   await saveHypotheses(alert.incident_id, rootCause);
   await saveComms(alert.incident_id, comms);
-  await postCommsToSlack(alert.incident_id, comms).catch(e =>
-    console.error('[orchestrator] Slack post failed:', e.message)
+  await postCommsToSlack(alert.incident_id, comms).catch((e: Error) =>
+    logger.error('Slack post failed', { incident_id: alert.incident_id, error: e.message })
   );
 
   // ── Step 3: Runbook ────────────────────────────────────────────────────────
-  console.log(`[orchestrator] Running Runbook Agent`);
+  logger.info('Running Runbook Agent', { incident_id: alert.incident_id });
   state.runbook = await runRunbook(state, rootCause.top_hypothesis);
   addEvent(`Runbook prepared: ${state.runbook.runbook_title}`, 'agent', 'action');
 
@@ -89,13 +90,13 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   // ── Step 4: Execute each step with human approval gate ────────────────────
   let lastExecResult = undefined;
   for (const step of state.runbook.steps) {
-    console.log(`[orchestrator] Step ${step.step_number}: ${step.title}`);
+    logger.info('Processing runbook step', { incident_id: alert.incident_id, step: step.step_number, title: step.title });
 
     let approved = true;
     const stepDbId = stepIdMap.get(step.step_number);
 
     if (step.requires_approval && stepDbId) {
-      console.log(`[orchestrator] Waiting for human approval on step ${step.step_number}`);
+      logger.info('Awaiting human approval', { incident_id: alert.incident_id, step: step.step_number });
       const approval = await requestApproval(alert.incident_id, stepDbId, step);
 
       if (approval.decision !== 'approved') {
@@ -104,11 +105,11 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
           'human', 'action'
         );
         if (approval.decision === 'rejected') {
-          console.log(`[orchestrator] Step ${step.step_number} rejected — stopping`);
+          logger.info('Step rejected — stopping runbook', { incident_id: alert.incident_id, step: step.step_number });
           break;
         }
         if (approval.decision === 'timeout') {
-          console.log(`[orchestrator] Approval timeout — escalating`);
+          logger.warn('Approval timeout — escalating', { incident_id: alert.incident_id, step: step.step_number });
           break;
         }
         approved = false;
@@ -168,21 +169,24 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
 
   state.postmortem = await runPostmortem(state, resolvedAt, duration);
 
-  // Create GitHub issue for follow-up action items
   const githubUrl = await createGithubIssue(
     state.postmortem.github_issue_title,
     state.postmortem.github_issue_body
-  ).catch(e => { console.error('[orchestrator] GitHub issue failed:', e.message); return ''; });
+  ).catch((e: Error) => {
+    logger.error('GitHub issue creation failed', { incident_id: alert.incident_id, error: e.message });
+    return '';
+  });
 
   if (githubUrl) {
     state.postmortem.github_issue_url = githubUrl;
   }
 
   await savePostmortem(alert.incident_id, state.postmortem);
+  logger.info('Incident pipeline complete', { incident_id: alert.incident_id, duration_min: duration });
 
   return state;
 }
 
-function sleep(ms: number) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

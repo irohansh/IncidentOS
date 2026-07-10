@@ -1,10 +1,12 @@
-# Project spec — contains build instructions and internal architecture
+# Project spec — internal architecture and build instructions
 CLAUDE.md
 
 # Environment — NEVER commit real credentials
 .env
 .env.local
 .env.*.local
+.env.production
+.env.staging
 
 # Dependencies
 node_modules/
@@ -12,7 +14,9 @@ node_modules/
 # Build output
 dist/
 dist-dashboard/
+dist-server/
 .next/
+out/
 
 # TypeScript incremental cache
 *.tsbuildinfo
@@ -30,9 +34,11 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+yarn-error.log*
 
 # Test output
 coverage/
+.nyc_output/
 
 # Turbo
 .turbo/
@@ -40,3 +46,6 @@ coverage/
 # Runtime
 *.pid
 pids/
+
+# npm pack
+*.tgz

@@ -7,7 +7,7 @@ export async function GET() {
   try {
     const incidents = await getIncidents();
     return NextResponse.json(incidents);
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }

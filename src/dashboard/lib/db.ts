@@ -1,7 +1,6 @@
-import { Pool } from 'pg';
+import { getPool } from '../../lib/db';
 
-// Shared pool for dashboard server components and API routes
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = getPool();
 
 export interface IncidentRow {
   incident_id: string;

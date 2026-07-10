@@ -1,4 +1,3 @@
-import { Pool } from 'pg';
 import type {
   AlertPayload,
   AgentLog,
@@ -9,8 +8,9 @@ import type {
   ValidatorOutput,
   PostmortemOutput,
 } from '../types/incident';
+import { getPool } from './db';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = getPool();
 
 export async function saveIncident(alert: AlertPayload, triage: TriageOutput): Promise<void> {
   await pool.query(

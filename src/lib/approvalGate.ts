@@ -1,7 +1,8 @@
-import { Pool } from 'pg';
 import type { RunbookStep } from '../types/incident';
+import { getPool } from './db';
+import { logger } from './logger';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = getPool();
 
 export interface ApprovalResult {
   decision: 'approved' | 'rejected' | 'timeout';
@@ -17,7 +18,7 @@ export async function requestApproval(
 ): Promise<ApprovalResult> {
   // Test mode: skip DB and immediately approve without blocking
   if (process.env.TEST_AUTO_APPROVE === 'true') {
-    console.log(`[approvalGate] TEST_AUTO_APPROVE — auto-approving step ${step.step_number}`);
+    logger.info('TEST_AUTO_APPROVE — auto-approving step', { incident_id: incidentId, step: step.step_number });
     return { decision: 'approved', decided_by: 'test-runner', decided_at: new Date().toISOString() };
   }
 

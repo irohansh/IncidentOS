@@ -25,7 +25,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     ]);
 
     return NextResponse.json({ incident, steps, approvals, triage, hypothesis, postmortem, logs });
-  } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 }
