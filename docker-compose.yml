@@ -1,0 +1,30 @@
+services:
+  webhook:
+    build:
+      context: .
+      target: server
+    image: incidentos-webhook
+    env_file: .env
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  dashboard:
+    build:
+      context: .
+      target: dashboard
+    image: incidentos-dashboard
+    env_file: .env
+    ports:
+      - "3001:3001"
+    restart: unless-stopped
+
+  # docker compose run --rm test
+  test:
+    build:
+      context: .
+      target: builder
+    image: incidentos-builder
+    env_file: .env
+    profiles: ["test"]
+    command: ["npm", "test"]

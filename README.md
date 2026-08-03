@@ -50,6 +50,18 @@ curl -X POST http://localhost:3000/webhook \
 The canonical end-to-end fixture lives in `src/tests/fixtures/sample-alert.ts` and is
 exercised by `npm run test:run`.
 
+## Docker
+
+Run both services (webhook + dashboard) without local Node setup:
+
+```bash
+cp .env.example .env          # set ANTHROPIC_API_KEY, DATABASE_URL
+docker compose up --build
+```
+
+Postgres is not containerized — `DATABASE_URL` stays pointed at external Neon. See
+[DOCKER.md](DOCKER.md) for build, logs, and running tests in-container.
+
 ## Architecture
 
 | Layer | Location | Notes |
