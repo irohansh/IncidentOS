@@ -25,6 +25,20 @@ import type {
   TimelineEvent,
 } from './types/incident';
 
+// Best-effort persistence for non-structural writes: after query() exhausts its retries,
+// log and continue rather than abort an in-progress remediation.
+async function persist(label: string, incidentId: string, op: () => Promise<unknown>): Promise<void> {
+  try {
+    await op();
+  } catch (err) {
+    logger.error('Persistence write failed after retries — continuing pipeline', {
+      incident_id: incidentId,
+      write: label,
+      error: (err as Error).message,
+    });
+  }
+}
+
 export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   const state: IncidentState = {
     alert,
@@ -54,7 +68,7 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   );
 
   await saveIncident(alert, state.triage);
-  await saveTriage(alert.incident_id, state.triage);
+  await persist('triage', alert.incident_id, () => saveTriage(alert.incident_id, state.triage!));
 
   // ── Step 2: Root Cause + Comms in parallel ─────────────────────────────────
   logger.info('Running Root Cause + Comms in parallel', { incident_id: alert.incident_id });
@@ -74,8 +88,8 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
     'agent', 'action'
   );
 
-  await saveHypotheses(alert.incident_id, rootCause);
-  await saveComms(alert.incident_id, comms);
+  await persist('hypotheses', alert.incident_id, () => saveHypotheses(alert.incident_id, rootCause));
+  await persist('comms', alert.incident_id, () => saveComms(alert.incident_id, comms));
   await postCommsToSlack(alert.incident_id, comms).catch((e: Error) =>
     logger.error('Slack post failed', { incident_id: alert.incident_id, error: e.message })
   );
@@ -127,9 +141,11 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
     );
 
     if (stepDbId) {
-      await markStepExecuted(
-        stepDbId,
-        execResult.success ? (execResult.stdout ?? 'ok') : (execResult.error ?? 'failed')
+      await persist('step_executed', alert.incident_id, () =>
+        markStepExecuted(
+          stepDbId,
+          execResult.success ? (execResult.stdout ?? 'ok') : (execResult.error ?? 'failed')
+        )
       );
     }
 
@@ -143,7 +159,9 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
     addEvent(`Step ${step.step_number} validated: ${validation.verdict}`, 'agent', 'action');
 
     if (stepDbId) {
-      await saveValidation(alert.incident_id, stepDbId, validation);
+      await persist('validation', alert.incident_id, () =>
+        saveValidation(alert.incident_id, stepDbId, validation)
+      );
     }
 
     if (validation.recommendation === 'rollback') {
@@ -181,7 +199,9 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
     state.postmortem.github_issue_url = githubUrl;
   }
 
-  await savePostmortem(alert.incident_id, state.postmortem);
+  await persist('postmortem', alert.incident_id, () =>
+    savePostmortem(alert.incident_id, state.postmortem!)
+  );
   logger.info('Incident pipeline complete', { incident_id: alert.incident_id, duration_min: duration });
 
   return state;

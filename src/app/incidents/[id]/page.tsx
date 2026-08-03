@@ -69,7 +69,7 @@ function ApprovalPanel({ step, approval, onDecide }: {
 
   return (
     <div className="alert alert-warning" style={{ marginTop: 10 }}>
-      <div style={{ fontWeight: 600, marginBottom: 8 }}>⚠ Awaiting human approval</div>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>Awaiting human approval</div>
       <div className="approve-form">
         <input
           type="text"

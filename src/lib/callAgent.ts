@@ -71,7 +71,8 @@ export async function callAgent<T>(
       { signal: controller.signal }
     );
     clearTimeout(timeoutHandle);
-    raw = response.content[0].type === 'text' ? response.content[0].text : '';
+    const block = response.content[0];
+    raw = block && block.type === 'text' ? block.text : '';
     inputTokens = response.usage.input_tokens;
     outputTokens = response.usage.output_tokens;
   } catch (err) {
@@ -127,7 +128,8 @@ export async function callAgent<T>(
         { signal: retryController.signal }
       );
       clearTimeout(retryTimeout);
-      const r = retry.content[0].type === 'text' ? retry.content[0].text : '';
+      const retryBlock = retry.content[0];
+      const r = retryBlock && retryBlock.type === 'text' ? retryBlock.text : '';
       const rs = r.indexOf('{');
       const re = r.lastIndexOf('}');
       if (rs === -1) throw new Error(`[${role}] Retry failed to produce JSON`);

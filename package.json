@@ -9,7 +9,10 @@
     "build:dashboard": "next build",
     "dev": "ts-node --project tsconfig.server.json src/webhook/server.ts",
     "dashboard": "next dev -p 3001",
-    "test:run": "ts-node --project tsconfig.server.json src/tests/run-test.ts"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:run": "ts-node --project tsconfig.server.json src/tests/run-test.ts",
+    "verify:db": "ts-node --project tsconfig.server.json src/tests/manual/db-longgap.ts"
   },
   "keywords": [],
   "author": "",
@@ -35,6 +38,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "ts-node": "^10.9.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
   }
 }

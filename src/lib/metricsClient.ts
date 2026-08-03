@@ -11,7 +11,7 @@ const SSRF_BLOCKED_HOSTS = [
   '0.0.0.0',
 ];
 
-function assertSafeUrl(raw: string, envKey: string): URL {
+export function assertSafeUrl(raw: string, envKey: string): URL {
   let url: URL;
   try {
     url = new URL(raw);
@@ -21,7 +21,8 @@ function assertSafeUrl(raw: string, envKey: string): URL {
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error(`${envKey} must use http or https, got: ${url.protocol}`);
   }
-  const hostname = url.hostname.toLowerCase();
+  // Strip brackets Node keeps on IPv6 literals so the blocklist matches "[::1]".
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (SSRF_BLOCKED_HOSTS.some((h) => hostname === h || hostname.endsWith('.' + h))) {
     throw new Error(`${envKey} points to a blocked metadata/loopback host: ${hostname}`);
   }

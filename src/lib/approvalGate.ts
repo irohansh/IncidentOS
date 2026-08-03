@@ -1,8 +1,6 @@
 import type { RunbookStep } from '../types/incident';
-import { getPool } from './db';
+import { query } from './db';
 import { logger } from './logger';
-
-const pool = getPool();
 
 export interface ApprovalResult {
   decision: 'approved' | 'rejected' | 'timeout';
@@ -26,7 +24,7 @@ export async function requestApproval(
   const timeoutSeconds = Math.floor(timeoutMs / 1000);
 
   // Insert the approval request
-  await pool.query(
+  await query(
     `INSERT INTO approval_requests
      (incident_id, step_id, timeout_seconds)
      VALUES ($1, $2, $3)`,
@@ -37,7 +35,7 @@ export async function requestApproval(
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(3000);
-    const result = await pool.query(
+    const result = await query(
       `SELECT decision, decided_by, decided_at
        FROM approval_requests
        WHERE incident_id = $1 AND step_id = $2
@@ -50,7 +48,7 @@ export async function requestApproval(
   }
 
   // Timeout — update the record and return
-  await pool.query(
+  await query(
     `UPDATE approval_requests SET decision = 'timeout', decided_at = NOW()
      WHERE incident_id = $1 AND step_id = $2`,
     [incidentId, stepId]

@@ -8,12 +8,10 @@ import type {
   ValidatorOutput,
   PostmortemOutput,
 } from '../types/incident';
-import { getPool } from './db';
-
-const pool = getPool();
+import { query } from './db';
 
 export async function saveIncident(alert: AlertPayload, triage: TriageOutput): Promise<void> {
-  await pool.query(
+  await query(
     `INSERT INTO incidents
        (incident_id, title, severity, affected_services, alert_source, alert_payload, started_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -33,7 +31,7 @@ export async function saveIncident(alert: AlertPayload, triage: TriageOutput): P
 }
 
 export async function saveAgentLog(log: AgentLog): Promise<void> {
-  await pool.query(
+  await query(
     `INSERT INTO agent_logs
        (incident_id, agent_role, model, input_tokens, output_tokens, duration_ms, error, timestamp)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -51,7 +49,7 @@ export async function saveAgentLog(log: AgentLog): Promise<void> {
 }
 
 export async function saveTriage(incidentId: string, triage: TriageOutput): Promise<void> {
-  await pool.query(
+  await query(
     `INSERT INTO incident_triage
        (incident_id, severity, affected_services, blast_radius, customer_impact, confidence, raw_output)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -69,7 +67,7 @@ export async function saveTriage(incidentId: string, triage: TriageOutput): Prom
 
 export async function saveHypotheses(incidentId: string, output: RootCauseOutput): Promise<void> {
   for (const h of output.hypotheses) {
-    await pool.query(
+    await query(
       `INSERT INTO incident_hypotheses
          (incident_id, rank, hypothesis, supporting_evidence, confidence, category)
        VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -80,7 +78,7 @@ export async function saveHypotheses(incidentId: string, output: RootCauseOutput
 
 export async function saveComms(incidentId: string, output: CommsOutput): Promise<void> {
   for (const draft of output.drafts) {
-    await pool.query(
+    await query(
       `INSERT INTO incident_comms (incident_id, audience, draft)
        VALUES ($1, $2, $3)`,
       [incidentId, draft.audience, draft.body]
@@ -95,7 +93,7 @@ export async function saveRunbookSteps(
 ): Promise<Map<number, string>> {
   const stepIdMap = new Map<number, string>();
   for (const step of steps) {
-    const result = await pool.query<{ id: string }>(
+    const result = await query<{ id: string }>(
       `INSERT INTO incident_runbook_steps
          (incident_id, step_number, action, command, tool, risk_level, requires_approval)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -116,7 +114,7 @@ export async function saveRunbookSteps(
 }
 
 export async function markStepExecuted(stepId: string, result: string): Promise<void> {
-  await pool.query(
+  await query(
     `UPDATE incident_runbook_steps
      SET status = 'done', executed_at = NOW(), result = $2
      WHERE id = $1`,
@@ -129,7 +127,7 @@ export async function saveValidation(
   stepId: string,
   v: ValidatorOutput
 ): Promise<void> {
-  await pool.query(
+  await query(
     `INSERT INTO incident_validations
        (incident_id, step_id, resolved, metrics_before, metrics_after, confidence, notes)
      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
@@ -149,7 +147,7 @@ export async function savePostmortem(
   incidentId: string,
   pm: PostmortemOutput
 ): Promise<void> {
-  await pool.query(
+  await query(
     `INSERT INTO incident_postmortems
        (incident_id, timeline, root_cause, contributing_factors, customer_impact,
         detection_gap, action_items, five_whys, draft_markdown, github_issue_url)
@@ -168,7 +166,7 @@ export async function savePostmortem(
     ]
   );
 
-  await pool.query(
+  await query(
     `UPDATE incidents SET status = 'postmortem', resolved_at = NOW()
      WHERE incident_id = $1`,
     [incidentId]

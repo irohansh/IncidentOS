@@ -238,10 +238,10 @@ async function main(): Promise<void> {
 
   if (failed.length > 0) {
     console.log('\nFAILED:');
-    failed.forEach(c => console.log(`  ✗  ${c.name}`));
+    failed.forEach(c => console.log(`  [FAIL]  ${c.name}`));
   }
   console.log('\nPASSED:');
-  passed.forEach(c => console.log(`  ✓  ${c.name}`));
+  passed.forEach(c => console.log(`  [PASS]  ${c.name}`));
 
   // ── Human-readable summary ───────────────────────────────────────────────────
   console.log('\n' + '='.repeat(60));
@@ -256,10 +256,10 @@ async function main(): Promise<void> {
   console.log(`Timeline events       : ${state.timeline.length}`);
 
   if (failed.length > 0) {
-    console.log(`\n✗  TEST FAILED — ${failed.length} check(s) did not pass`);
+    console.log(`\nTEST FAILED — ${failed.length} check(s) did not pass`);
     process.exit(1);
   }
-  console.log('\n✓  ALL CHECKS PASSED');
+  console.log('\nALL CHECKS PASSED');
 }
 
 main();

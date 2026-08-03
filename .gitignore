@@ -1,5 +1,6 @@
-# Project spec — internal architecture and build instructions
+# Internal docs — architecture spec and local run/test guide
 CLAUDE.md
+run.md
 
 # Environment — NEVER commit real credentials
 .env

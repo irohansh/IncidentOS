@@ -46,11 +46,11 @@ const HARD_BLOCKED: { pattern: RegExp | ((cmd: string) => boolean); reason: stri
   // Fork bomb
   { pattern: /:\s*\(\s*\)\s*\{.*:\s*\|.*:\s*&/,                          reason: 'fork bomb pattern' },
 
-  // Writing to /etc to prevent crontab/sudoers/hosts tampering
-  { pattern: /\b(tee|>|>>)\s+\/etc\/(cron|sudoers|passwd|shadow|hosts)\b/i, reason: 'write to sensitive /etc file' },
+  // Writing to sensitive /etc files (crontab/sudoers/hosts tampering).
+  { pattern: /(?:\btee\b|>>?)\s*\/etc\/(cron|sudoers|passwd|shadow|hosts)/i, reason: 'write to sensitive /etc file' },
 ];
 
-function checkBlocked(command: string): { blocked: true; reason: string } | null {
+export function checkBlocked(command: string): { blocked: true; reason: string } | null {
   for (const rule of HARD_BLOCKED) {
     const matched =
       typeof rule.pattern === 'function'
