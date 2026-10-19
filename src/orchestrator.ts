@@ -249,7 +249,13 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
         outcome = 'rolled_back';
         break;
       }
-      if (validation.resolved) {
+      // P1.4: Never auto-resolve on 'unknown' verdict — requires human confirmation.
+      if (validation.verdict === 'unknown') {
+        addEvent('Validator: metrics unavailable — unknown verdict, human confirmation required', 'agent', 'escalation');
+        outcome = 'unresolved';
+        break;
+      }
+      if (validation.resolved && validation.verdict === 'resolved') {
         addEvent('Incident resolved by validator confirmation', 'agent', 'mitigation');
         outcome = 'resolved';
         break;

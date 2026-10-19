@@ -155,6 +155,8 @@ export interface RunbookOutput {
   caveat?: string;
 }
 
+export type ExecutionMode = 'real' | 'dry_run' | 'simulated';
+
 // Executor agent output (per step)
 export interface ExecutorOutput {
   incident_id: string;
@@ -168,6 +170,7 @@ export interface ExecutorOutput {
   success: boolean;
   error?: string;
   next_step_recommendation: 'proceed' | 'wait_and_validate' | 'abort' | 'escalate';
+  execution_mode: ExecutionMode;
 }
 
 // Validator agent output (per step)
@@ -179,7 +182,7 @@ export interface ValidatorOutput {
   metrics_after: MetricsSnapshot;
   improvement_percent?: number;
   confidence: number;
-  verdict: 'resolved' | 'improving' | 'no_change' | 'degraded';
+  verdict: 'resolved' | 'improving' | 'no_change' | 'degraded' | 'unknown';
   recommendation: 'mark_resolved' | 'continue_runbook' | 'rollback' | 'escalate';
   notes: string;
 }
