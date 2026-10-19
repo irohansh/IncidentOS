@@ -1,4 +1,32 @@
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: incidentos
+      POSTGRES_USER: incidentos
+      POSTGRES_PASSWORD: incidentos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U incidentos"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    profiles: ["local"]
+
+  migrate:
+    build:
+      context: .
+      target: deps
+    image: incidentos-migrate
+    env_file: .env
+    command: ["npx", "ts-node", "--project", "tsconfig.server.json", "src/db/migrate.ts"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: ["local"]
+    restart: no
+
   webhook:
     build:
       context: .
@@ -8,6 +36,30 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  worker:
+    build:
+      context: .
+      target: worker
+    image: incidentos-worker
+    env_file: .env
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - "${KUBECONFIG_PATH:-/dev/null}:/home/node/.kube/config:ro"
 
   dashboard:
     build:
@@ -18,8 +70,18 @@ services:
     ports:
       - "3001:3001"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3001/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
-  # docker compose run --rm test
+  # docker compose --profile test run --rm test
   test:
     build:
       context: .
@@ -28,3 +90,6 @@ services:
     env_file: .env
     profiles: ["test"]
     command: ["npm", "test"]
+
+volumes:
+  pgdata:
