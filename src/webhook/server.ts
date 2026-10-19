@@ -3,12 +3,12 @@ import express, { Request, Response } from 'express';
 import crypto from 'crypto';
 import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
-import { runIncident } from '../orchestrator';
 import { closePool } from '../lib/db';
 import { logger } from '../lib/logger';
 import { validateEnv } from '../lib/env';
 import { AlertSchema } from './validation';
 import { claimWebhookEvent } from '../lib/webhookEvents';
+import { saveIncidentStub, enqueueJob } from '../lib/incidentStore';
 import { verifyPagerDutySignature, adaptPagerDuty } from './adapters/pagerduty';
 import { adaptGrafana } from './adapters/grafana';
 import { adaptAlertmanager } from './adapters/alertmanager';
@@ -70,7 +70,7 @@ async function handleAlert(
 ): Promise<void> {
   const requestId = crypto.randomUUID();
 
-  // Atomic dedup — first delivery starts pipeline; duplicates get 200.
+  // Atomic dedup — first delivery claims the event; duplicates get 200.
   let claim;
   try {
     claim = await claimWebhookEvent(alert, { eventType, signatureVerified });
@@ -89,7 +89,21 @@ async function handleAlert(
     return;
   }
 
-  logger.info('Alert accepted', {
+  // Save incident stub and enqueue job — the worker picks it up and runs the pipeline.
+  try {
+    await saveIncidentStub(alert);
+    await enqueueJob(alert.incident_id);
+  } catch (err) {
+    logger.error('Failed to save incident or enqueue job', {
+      requestId,
+      incident_id: alert.incident_id,
+      error: (err as Error).message,
+    });
+    res.status(503).json({ error: 'Database unavailable — please retry' });
+    return;
+  }
+
+  logger.info('Alert accepted, job enqueued', {
     requestId,
     incident_id: alert.incident_id,
     title: alert.title,
@@ -97,11 +111,6 @@ async function handleAlert(
   });
 
   res.status(202).json({ incident_id: alert.incident_id, request_id: requestId, status: 'accepted' });
-
-  // Fire-and-forget — pipeline is async; results persist to Postgres.
-  runIncident(alert).catch((err: Error) => {
-    logger.error('Pipeline failed', { requestId, incident_id: alert.incident_id, error: err.message });
-  });
 }
 
 // ── PagerDuty ─────────────────────────────────────────────────────────────────

@@ -10,14 +10,43 @@ import type {
 } from '../types/incident';
 import { query } from './db';
 
+// Insert an incident stub immediately when the webhook arrives (before pipeline runs).
+// Used by the webhook server to claim the incident before enqueuing a job.
+export async function saveIncidentStub(alert: AlertPayload): Promise<void> {
+  await query(
+    `INSERT INTO incidents
+       (incident_id, title, severity, affected_services, alert_source, alert_payload, started_at, status)
+     VALUES ($1, $2, NULL, $3, $4, $5, $6, 'processing')
+     ON CONFLICT (incident_id) DO NOTHING`,
+    [
+      alert.incident_id,
+      alert.title,
+      alert.affected_services ?? [],
+      alert.alert_source,
+      JSON.stringify(alert.raw),
+      alert.started_at,
+    ]
+  );
+}
+
+export async function enqueueJob(incidentId: string): Promise<void> {
+  await query(
+    `INSERT INTO incident_jobs (incident_id)
+     VALUES ($1)
+     ON CONFLICT (incident_id) DO NOTHING`,
+    [incidentId]
+  );
+}
+
 export async function saveIncident(alert: AlertPayload, triage: TriageOutput): Promise<void> {
   await query(
     `INSERT INTO incidents
-       (incident_id, title, severity, affected_services, alert_source, alert_payload, started_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+       (incident_id, title, severity, affected_services, alert_source, alert_payload, started_at, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'active')
      ON CONFLICT (incident_id) DO UPDATE
        SET severity = EXCLUDED.severity,
-           affected_services = EXCLUDED.affected_services`,
+           affected_services = EXCLUDED.affected_services,
+           status = 'active'`,
     [
       alert.incident_id,
       alert.title,
