@@ -8,6 +8,8 @@ import { VALIDATOR_PROMPT } from '../prompts/validator';
 import { POSTMORTEM_PROMPT } from '../prompts/postmortem';
 import type { AgentLog } from '../types/incident';
 import { logger } from './logger';
+import { UNTRUSTED_PREAMBLE } from './untrusted';
+import { redact } from './redact';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -60,12 +62,16 @@ export async function callAgent<T>(
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
 
+  // Prepend the untrusted-data preamble so every agent knows to treat alert-derived
+  // content as data, never instructions.
+  const fullSystemPrompt = `${UNTRUSTED_PREAMBLE}\n\n${systemPrompt}`;
+
   try {
     const response = await anthropic.messages.create(
       {
         model,
         max_tokens: 8192,
-        system: systemPrompt,
+        system: fullSystemPrompt,
         messages: [{ role: 'user', content: JSON.stringify(payload) }],
       },
       { signal: controller.signal }
@@ -118,7 +124,7 @@ export async function callAgent<T>(
         {
           model,
           max_tokens: 8192,
-          system: systemPrompt,
+          system: fullSystemPrompt,
           messages: [
             { role: 'user', content: JSON.stringify(payload) },
             { role: 'assistant', content: raw },
