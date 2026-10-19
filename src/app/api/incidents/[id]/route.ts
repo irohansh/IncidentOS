@@ -11,7 +11,8 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
+  // Authentication enforced by middleware.ts.
   try {
     const { id } = await params;
     const [incident, steps, triage, hypothesis, postmortem, logs, approvals] = await Promise.all([

@@ -96,13 +96,15 @@ export async function decideApproval(
   stepId: string,
   decision: 'approved' | 'rejected',
   decidedBy: string
-): Promise<void> {
-  await pool.query(
+): Promise<number> {
+  const result = await pool.query(
     `UPDATE approval_requests
      SET decision = $1, decided_by = $2, decided_at = NOW()
      WHERE step_id = $3 AND decision IS NULL`,
     [decision, decidedBy, stepId]
   );
+  if ((result.rowCount ?? 0) === 0) return 0;
+
   if (decision === 'approved') {
     await pool.query(
       `UPDATE incident_runbook_steps SET status = 'approved', approved_by = $1, approved_at = NOW()
@@ -115,6 +117,7 @@ export async function decideApproval(
       [stepId]
     );
   }
+  return result.rowCount ?? 0;
 }
 
 export async function getAgentLogs(incidentId: string): Promise<AgentLogRow[]> {
