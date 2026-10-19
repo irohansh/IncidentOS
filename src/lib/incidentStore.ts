@@ -151,7 +151,11 @@ export async function savePostmortem(
     `INSERT INTO incident_postmortems
        (incident_id, timeline, root_cause, contributing_factors, customer_impact,
         detection_gap, action_items, five_whys, draft_markdown, github_issue_url)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     ON CONFLICT (incident_id) DO UPDATE
+       SET timeline = EXCLUDED.timeline,
+           root_cause = EXCLUDED.root_cause,
+           github_issue_url = COALESCE(EXCLUDED.github_issue_url, incident_postmortems.github_issue_url)`,
     [
       incidentId,
       JSON.stringify(pm.timeline),
@@ -170,5 +174,25 @@ export async function savePostmortem(
     `UPDATE incidents SET status = 'postmortem', resolved_at = NOW()
      WHERE incident_id = $1`,
     [incidentId]
+  );
+}
+
+export async function updateIncidentOutcome(
+  incidentId: string,
+  outcome: string
+): Promise<void> {
+  await query(
+    `UPDATE incidents SET outcome = $1 WHERE incident_id = $2`,
+    [outcome, incidentId]
+  );
+}
+
+export async function updateIncidentStatus(
+  incidentId: string,
+  status: string
+): Promise<void> {
+  await query(
+    `UPDATE incidents SET status = $1 WHERE incident_id = $2`,
+    [status, incidentId]
   );
 }
