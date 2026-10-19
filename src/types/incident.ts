@@ -33,6 +33,16 @@ export interface AlertPayload {
   raw: Record<string, unknown>;
 }
 
+export type IntegrationStatus = 'ok' | 'unavailable' | 'not_configured';
+
+export interface IntegrationHealth {
+  prometheus: IntegrationStatus;
+  grafana: IntegrationStatus;
+  prometheus_detail?: string;
+  grafana_detail?: string;
+  metrics_retrieved?: string[];
+}
+
 // Metrics snapshot fetched from Prometheus/Grafana
 export interface MetricsSnapshot {
   fetched_at: string;
@@ -46,6 +56,7 @@ export interface MetricsSnapshot {
   grafana_active_alerts?: number;
   grafana_annotations?: string[];
   custom: Record<string, number>;
+  integration_health?: IntegrationHealth;
 }
 
 // Triage agent output

@@ -1,4 +1,4 @@
-import type { MetricsSnapshot } from '../types/incident';
+import type { MetricsSnapshot, IntegrationHealth } from '../types/incident';
 import { logger } from './logger';
 
 // Addresses that are only reachable from inside cloud VMs and must never be fetched.
@@ -29,32 +29,40 @@ export function assertSafeUrl(raw: string, envKey: string): URL {
   return url;
 }
 
-export async function fetchMetrics(services: string[]): Promise<MetricsSnapshot> {
+export async function fetchMetrics(
+  services: string[],
+  fetchImpl: typeof fetch = globalThis.fetch
+): Promise<MetricsSnapshot> {
   const baseRaw = process.env.PROMETHEUS_URL;
+  const grafanaRaw = process.env.GRAFANA_URL;
 
   const snapshot: MetricsSnapshot = {
     fetched_at: new Date().toISOString(),
     custom: {},
   };
 
+  const health: IntegrationHealth = {
+    prometheus: 'not_configured',
+    grafana: 'not_configured',
+    metrics_retrieved: [],
+  };
+
+  // ── Prometheus ────────────────────────────────────────────────────────────
   if (!baseRaw) {
-    snapshot.error_rate_5m = 0;
-    snapshot.p99_latency_ms = 0;
-    snapshot.request_rate = 0;
-    snapshot.cpu_usage_percent = 0;
-    snapshot.memory_usage_percent = 0;
-    snapshot.pod_restart_count = 0;
-    snapshot.db_connection_pool_usage = 0;
+    health.prometheus = 'not_configured';
   } else {
     let base: URL;
     try {
       base = assertSafeUrl(baseRaw, 'PROMETHEUS_URL');
     } catch (err) {
-      logger.error('PROMETHEUS_URL rejected', { error: (err as Error).message });
+      const msg = (err as Error).message;
+      logger.error('PROMETHEUS_URL rejected', { error: msg });
+      health.prometheus = 'unavailable';
+      health.prometheus_detail = msg;
+      snapshot.integration_health = health;
       return snapshot;
     }
 
-    // Sanitize service names: only alphanumeric, dash, underscore, dot
     const safeServices = services
       .map((s) => s.replace(/[^a-zA-Z0-9_\-.]/g, ''))
       .filter(Boolean);
@@ -70,46 +78,72 @@ export async function fetchMetrics(services: string[]): Promise<MetricsSnapshot>
       db_connection_pool_usage: `avg(db_connection_pool_used{${serviceFilter}}) / avg(db_connection_pool_max{${serviceFilter}})`,
     };
 
-    await Promise.allSettled(
+    let anySucceeded = false;
+    let anyFailed = false;
+
+    const results = await Promise.allSettled(
       Object.entries(queries).map(async ([key, query]) => {
-        try {
-          const url = new URL('/api/v1/query', base);
-          url.searchParams.set('query', query);
-          const res = await fetch(url.toString(), { signal: AbortSignal.timeout(5000) });
-          const json = (await res.json()) as { data: { result: { value: [number, string] }[] } };
-          const val = json.data?.result?.[0]?.value?.[1];
-          if (val !== undefined) {
-            (snapshot as unknown as Record<string, unknown>)[key] = parseFloat(val);
-          }
-        } catch {
-          // silently skip unavailable metrics
+        const url = new URL('/api/v1/query', base);
+        url.searchParams.set('query', query);
+        const res = await fetchImpl(url.toString(), { signal: AbortSignal.timeout(5000) });
+        const json = (await res.json()) as { data: { result: { value: [number, string] }[] } };
+        const val = json.data?.result?.[0]?.value?.[1];
+        if (val !== undefined) {
+          (snapshot as unknown as Record<string, unknown>)[key] = parseFloat(val);
+          health.metrics_retrieved?.push(key);
         }
+        return key;
       })
     );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        anySucceeded = true;
+      } else {
+        anyFailed = true;
+      }
+    }
+
+    if (!anySucceeded && anyFailed) {
+      health.prometheus = 'unavailable';
+      health.metrics_retrieved = [];
+    } else if (anySucceeded) {
+      health.prometheus = 'ok';
+    }
   }
 
-  const grafana = await fetchGrafanaData();
-  if (grafana.activeAlerts > 0) snapshot.grafana_active_alerts = grafana.activeAlerts;
-  if (grafana.annotations.length > 0) snapshot.grafana_annotations = grafana.annotations;
+  // ── Grafana ───────────────────────────────────────────────────────────────
+  if (!grafanaRaw) {
+    health.grafana = 'not_configured';
+  } else {
+    const grafanaResult = await fetchGrafanaData(fetchImpl);
+    health.grafana = grafanaResult.status;
+    if (grafanaResult.status === 'ok') {
+      if (grafanaResult.activeAlerts > 0) snapshot.grafana_active_alerts = grafanaResult.activeAlerts;
+      if (grafanaResult.annotations.length > 0) snapshot.grafana_annotations = grafanaResult.annotations;
+    }
+  }
 
+  snapshot.integration_health = health;
   return snapshot;
 }
 
-interface GrafanaData {
+interface GrafanaResult {
+  status: 'ok' | 'unavailable' | 'not_configured';
   activeAlerts: number;
   annotations: string[];
 }
 
-async function fetchGrafanaData(): Promise<GrafanaData> {
+async function fetchGrafanaData(fetchImpl: typeof fetch): Promise<GrafanaResult> {
   const baseRaw = process.env.GRAFANA_URL;
-  if (!baseRaw) return { activeAlerts: 0, annotations: [] };
+  if (!baseRaw) return { status: 'not_configured', activeAlerts: 0, annotations: [] };
 
   let base: URL;
   try {
     base = assertSafeUrl(baseRaw, 'GRAFANA_URL');
   } catch (err) {
     logger.error('GRAFANA_URL rejected', { error: (err as Error).message });
-    return { activeAlerts: 0, annotations: [] };
+    return { status: 'unavailable', activeAlerts: 0, annotations: [] };
   }
 
   const apiKey = process.env.GRAFANA_API_KEY;
@@ -118,12 +152,14 @@ async function fetchGrafanaData(): Promise<GrafanaData> {
 
   let activeAlerts = 0;
   const annotations: string[] = [];
+  let reachable = false;
 
   // Try unified alerting (Grafana 8+)
   try {
     const url = new URL('/api/alertmanager/grafana/api/v2/alerts', base);
-    const res = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
+    const res = await fetchImpl(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
     if (res.ok) {
+      reachable = true;
       const alerts = (await res.json()) as Array<{
         status?: { state?: string };
         labels?: Record<string, string>;
@@ -138,12 +174,13 @@ async function fetchGrafanaData(): Promise<GrafanaData> {
       });
     }
   } catch {
-    // Fall back to legacy alerting API
+    // Try legacy alerting API
     try {
       const url = new URL('/api/alerts', base);
       url.searchParams.set('state', 'alerting');
-      const res = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
+      const res = await fetchImpl(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
       if (res.ok) {
+        reachable = true;
         const alerts = (await res.json()) as Array<{ name?: string; newStateDate?: string }>;
         activeAlerts = alerts.length;
         alerts.forEach((a) => {
@@ -157,6 +194,10 @@ async function fetchGrafanaData(): Promise<GrafanaData> {
     }
   }
 
+  if (!reachable) {
+    return { status: 'unavailable', activeAlerts: 0, annotations: [] };
+  }
+
   // Recent annotations (last 2 hours)
   try {
     const from = Date.now() - 2 * 60 * 60 * 1000;
@@ -165,7 +206,7 @@ async function fetchGrafanaData(): Promise<GrafanaData> {
     url.searchParams.set('from', String(from));
     url.searchParams.set('to', String(to));
     url.searchParams.set('limit', '20');
-    const res = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
+    const res = await fetchImpl(url.toString(), { headers, signal: AbortSignal.timeout(5000) });
     if (res.ok) {
       const annots = (await res.json()) as Array<{ text?: string; time?: number; tags?: string[] }>;
       annots
@@ -180,5 +221,5 @@ async function fetchGrafanaData(): Promise<GrafanaData> {
     // skip if annotations endpoint fails
   }
 
-  return { activeAlerts, annotations };
+  return { status: 'ok', activeAlerts, annotations };
 }
