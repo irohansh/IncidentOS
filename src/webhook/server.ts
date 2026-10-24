@@ -8,7 +8,7 @@ import { logger } from '../lib/logger';
 import { validateEnv } from '../lib/env';
 import { AlertSchema } from './validation';
 import { claimWebhookEvent } from '../lib/webhookEvents';
-import { saveIncidentStub, enqueueJob } from '../lib/incidentStore';
+import { saveIncidentStub, enqueueJob, getIncidentIdByExternalId, updateIncidentStatus } from '../lib/incidentStore';
 import { verifyPagerDutySignature, adaptPagerDuty } from './adapters/pagerduty';
 import { adaptGrafana } from './adapters/grafana';
 import { adaptAlertmanager } from './adapters/alertmanager';
@@ -143,8 +143,19 @@ app.post('/webhook/pagerduty', strictLimiter, (req, res) => {
   }
 
   if (result.kind === 'resolve') {
-    // TODO: update existing incident status in P2.2
-    res.status(200).json({ status: 'ignored', note: 'resolve events not yet fully handled' });
+    // P2.2: update existing incident status; never start a new pipeline.
+    const incidentId = `pagerduty:${result.externalId}`;
+    getIncidentIdByExternalId(incidentId)
+      .then((id) => {
+        if (id) {
+          return updateIncidentStatus(id, 'resolved');
+        }
+        logger.info('PagerDuty resolve event for unknown incident — ignoring', { externalId: result.externalId });
+      })
+      .catch((e: Error) =>
+        logger.error('Failed to update incident status on PD resolve', { error: e.message })
+      );
+    res.status(200).json({ status: 'acknowledged', note: 'resolve event — updating status' });
     return;
   }
 

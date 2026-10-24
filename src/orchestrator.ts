@@ -7,7 +7,7 @@ import { runValidator } from './agents/validator';
 import { runPostmortem } from './agents/postmortem';
 import { requestApproval } from './lib/approvalGate';
 import { fetchMetrics } from './lib/metricsClient';
-import { postCommsToSlack, createGithubIssue, fetchRecentDeploys } from './lib/mcpClient';
+import { postCommsToSlack, createGithubIssue, fetchRecentDeploys } from './lib/integrations';
 import {
   saveIncident,
   saveTriage,
@@ -18,6 +18,9 @@ import {
   saveValidation,
   savePostmortem,
   updateIncidentOutcome,
+  getRecentIncidents,
+  getIncidentGithubIssueUrl,
+  saveIncidentGithubIssueUrl,
 } from './lib/incidentStore';
 import { logger } from './lib/logger';
 import type {
@@ -70,8 +73,11 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
 
   // ── Step 1: Triage ─────────────────────────────────────────────────────────
   logger.info('Running Triage', { incident_id: alert.incident_id });
-  const metrics = await fetchMetrics(alert.affected_services ?? []);
-  state.triage = await runTriage(alert, metrics);
+  const [metrics, recentIncidents] = await Promise.all([
+    fetchMetrics(alert.affected_services ?? []),
+    getRecentIncidents(5).catch(() => []),
+  ]);
+  state.triage = await runTriage(alert, metrics, recentIncidents);
   addEvent(
     `Triage complete: ${state.triage.severity} — ${state.triage.blast_radius}`,
     'agent', 'escalation'
@@ -83,7 +89,7 @@ export async function runIncident(alert: AlertPayload): Promise<IncidentState> {
   // ── Step 2: Root Cause + Comms in parallel (P3.4: allSettled so one failure doesn't discard the other)
   logger.info('Running Root Cause + Comms in parallel', { incident_id: alert.incident_id });
   const [rcResult, commsResult] = await Promise.allSettled([
-    fetchRecentDeploys(alert.affected_services ?? []).then((deps) => runRootCause(state, deps)),
+    fetchRecentDeploys(alert.affected_services ?? []).then((deps) => runRootCause(state, deps, [], [], [])),
     runComms(state, {
       company_name:    process.env.COMPANY_NAME ?? 'Acme',
       product_name:    process.env.PRODUCT_NAME ?? 'Platform',
@@ -306,19 +312,28 @@ async function runPostmortemAndFinish(
   }
 
   if (state.postmortem) {
-    const githubUrl = await createGithubIssue(
-      state.postmortem.github_issue_title,
-      state.postmortem.github_issue_body
-    ).catch((e: Error) => {
-      logger.error('GitHub issue creation failed', {
-        incident_id: alert.incident_id,
-        error: e.message,
+    // P3.6: Idempotent — skip creation if URL already stored.
+    const existingUrl = await getIncidentGithubIssueUrl(alert.incident_id).catch(() => null);
+    if (existingUrl) {
+      state.postmortem.github_issue_url = existingUrl;
+    } else {
+      const githubUrl = await createGithubIssue(
+        state.postmortem.github_issue_title,
+        state.postmortem.github_issue_body
+      ).catch((e: Error) => {
+        logger.error('GitHub issue creation failed', {
+          incident_id: alert.incident_id,
+          error: e.message,
+        });
+        return '';
       });
-      return '';
-    });
 
-    if (githubUrl) {
-      state.postmortem.github_issue_url = githubUrl;
+      if (githubUrl) {
+        state.postmortem.github_issue_url = githubUrl;
+        await persist('github_issue_url', alert.incident_id, () =>
+          saveIncidentGithubIssueUrl(alert.incident_id, githubUrl)
+        );
+      }
     }
 
     await persist('postmortem', alert.incident_id, () =>

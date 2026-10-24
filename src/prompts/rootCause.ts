@@ -29,10 +29,10 @@ Signal interpretation guide:
 ## Input you will receive
 A JSON object with:
 - incident: IncidentState (full context including triage output)
-- recent_deploys: RecentDeploy[] (last 10 commits deployed to affected services)
-- metrics_history: MetricsSnapshot[] (metrics at 5-minute intervals for last 2 hours)
-- correlated_alerts: string[] (other alerts that fired within 10 minutes of this one)
-- runbook_hints: string[] (tags from matching runbooks, if any)
+- recent_deploys: RecentDeploy[] (last 10 commits; may be empty if GitHub is unconfigured)
+- metrics_history: MetricsSnapshot[] (metrics at 5-minute intervals for last 2 hours; may be empty if Prometheus is unavailable)
+- correlated_alerts: string[] (other alerts that fired within 10 minutes; may be empty)
+- runbook_hints: string[] (matching runbook tags; may be empty)
 
 ## Output format
 Respond with valid JSON only.

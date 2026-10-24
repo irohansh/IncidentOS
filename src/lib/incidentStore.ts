@@ -225,3 +225,47 @@ export async function updateIncidentStatus(
     [status, incidentId]
   );
 }
+
+export async function getRecentIncidents(limit: number): Promise<Array<{
+  incident_id: string;
+  title: string;
+  severity: string | null;
+  status: string;
+  started_at: string;
+}>> {
+  const result = await query<{
+    incident_id: string;
+    title: string;
+    severity: string | null;
+    status: string;
+    started_at: string;
+  }>(
+    `SELECT incident_id, title, severity, status, started_at
+     FROM incidents ORDER BY started_at DESC LIMIT $1`,
+    [limit]
+  );
+  return result.rows;
+}
+
+export async function getIncidentIdByExternalId(externalId: string): Promise<string | null> {
+  const result = await query<{ incident_id: string }>(
+    `SELECT incident_id FROM incidents WHERE incident_id = $1 OR external_id = $1 LIMIT 1`,
+    [externalId]
+  );
+  return result.rows[0]?.incident_id ?? null;
+}
+
+export async function saveIncidentGithubIssueUrl(incidentId: string, url: string): Promise<void> {
+  await query(
+    `UPDATE incidents SET github_issue_url = $1 WHERE incident_id = $2`,
+    [url, incidentId]
+  );
+}
+
+export async function getIncidentGithubIssueUrl(incidentId: string): Promise<string | null> {
+  const result = await query<{ github_issue_url: string | null }>(
+    `SELECT github_issue_url FROM incidents WHERE incident_id = $1`,
+    [incidentId]
+  );
+  return result.rows[0]?.github_issue_url ?? null;
+}

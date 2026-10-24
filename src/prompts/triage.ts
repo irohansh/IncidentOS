@@ -37,8 +37,8 @@ P3 — No customer impact. Internal monitoring alert, elevated metric that has n
 ## Input you will receive
 A JSON object with:
 - alert: AlertPayload (the raw alert from PagerDuty or webhook)
-- metrics: MetricsSnapshot (current Prometheus metrics for affected services)
-- recent_incidents: array of last 5 incidents for context
+- metrics: MetricsSnapshot (current Prometheus metrics; may be empty if Prometheus is unavailable — check integration_health)
+- recent_incidents: array of up to 5 recent incidents for context (may be empty if this is the first incident)
 
 ## Output format
 Respond with valid JSON only. No prose, no markdown, no explanation outside JSON.

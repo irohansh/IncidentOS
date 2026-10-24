@@ -6,15 +6,21 @@ import { RUNBOOK_PROMPT } from '../prompts/runbook';
 import { EXECUTOR_PROMPT } from '../prompts/executor';
 import { VALIDATOR_PROMPT } from '../prompts/validator';
 import { POSTMORTEM_PROMPT } from '../prompts/postmortem';
+import { AGENT_SCHEMAS } from '../types/schemas';
 import type { AgentLog } from '../types/incident';
 import { logger } from './logger';
 import { UNTRUSTED_PREAMBLE } from './untrusted';
-import { redact } from './redact';
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+// P3.2: Set maxRetries explicitly; SDK will retry 429/529/5xx/network errors
+// with exponential backoff.  Default is 2; operator can raise via env.
+const SDK_MAX_RETRIES = parseInt(process.env.AGENT_API_MAX_RETRIES ?? '2', 10);
 
-// Per-agent call timeout — prevents a hung API call from blocking the pipeline indefinitely
-const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS ?? '300000', 10); // 5 min default
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+  maxRetries: SDK_MAX_RETRIES,
+});
+
+const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_TIMEOUT_MS ?? '300000', 10);
 
 export type AgentRole =
   | 'triage'
@@ -35,16 +41,37 @@ const PROMPTS: Record<AgentRole, string> = {
   postmortem: POSTMORTEM_PROMPT,
 };
 
-// Sonnet for deep reasoning, Haiku for speed-critical roles
 const MODEL_MAP: Record<AgentRole, string> = {
-  triage:     'claude-haiku-4-5',
-  rootCause:  'claude-sonnet-4-6',
-  comms:      'claude-haiku-4-5',
-  runbook:    'claude-sonnet-4-6',
-  executor:   'claude-haiku-4-5',
-  validator:  'claude-haiku-4-5',
-  postmortem: 'claude-sonnet-4-6',
+  triage:     process.env.MODEL_TRIAGE     ?? 'claude-haiku-4-5',
+  rootCause:  process.env.MODEL_ROOT_CAUSE ?? 'claude-sonnet-4-6',
+  comms:      process.env.MODEL_COMMS      ?? 'claude-haiku-4-5',
+  runbook:    process.env.MODEL_RUNBOOK    ?? 'claude-sonnet-4-6',
+  executor:   process.env.MODEL_EXECUTOR   ?? 'claude-haiku-4-5',
+  validator:  process.env.MODEL_VALIDATOR  ?? 'claude-haiku-4-5',
+  postmortem: process.env.MODEL_POSTMORTEM ?? 'claude-sonnet-4-6',
 };
+
+function extractJson(text: string): string | null {
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1) return null;
+  return text.slice(start, end + 1);
+}
+
+function fixRequiresApproval<T>(role: AgentRole, parsed: T): T {
+  if (role !== 'runbook') return parsed;
+  const obj = parsed as Record<string, unknown>;
+  const steps = obj.steps as Array<Record<string, unknown>> | undefined;
+  if (!Array.isArray(steps)) return parsed;
+  obj.steps = steps.map((step) => {
+    const risk = step.risk_level as string;
+    if (['medium', 'high', 'critical'].includes(risk) && !step.requires_approval) {
+      return { ...step, requires_approval: true };
+    }
+    return step;
+  });
+  return parsed;
+}
 
 export async function callAgent<T>(
   role: AgentRole,
@@ -52,19 +79,15 @@ export async function callAgent<T>(
   incidentId: string
 ): Promise<T> {
   const model = MODEL_MAP[role];
-  const systemPrompt = PROMPTS[role];
+  const fullSystemPrompt = `${UNTRUSTED_PREAMBLE}\n\n${PROMPTS[role]}`;
   const start = Date.now();
 
-  let raw: string;
+  let raw = '';
   let inputTokens = 0;
   let outputTokens = 0;
 
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
-
-  // Prepend the untrusted-data preamble so every agent knows to treat alert-derived
-  // content as data, never instructions.
-  const fullSystemPrompt = `${UNTRUSTED_PREAMBLE}\n\n${systemPrompt}`;
 
   try {
     const response = await anthropic.messages.create(
@@ -83,8 +106,7 @@ export async function callAgent<T>(
     outputTokens = response.usage.output_tokens;
   } catch (err) {
     clearTimeout(timeoutHandle);
-    const msg = (err as Error).message;
-    throw new Error(`[${role}] API call failed: ${msg}`);
+    throw new Error(`[${role}] API call failed: ${(err as Error).message}`);
   }
 
   const log: AgentLog = {
@@ -96,7 +118,10 @@ export async function callAgent<T>(
     duration_ms: Date.now() - start,
     timestamp: new Date().toISOString(),
   };
-  logger.info('Agent call complete', { incident_id: incidentId, role, model, input_tokens: inputTokens, output_tokens: outputTokens, duration_ms: log.duration_ms });
+  logger.info('Agent call complete', {
+    incident_id: incidentId, role, model,
+    input_tokens: inputTokens, output_tokens: outputTokens, duration_ms: log.duration_ms,
+  });
 
   try {
     const { saveAgentLog } = await import('./incidentStore');
@@ -105,43 +130,84 @@ export async function callAgent<T>(
     logger.error('Failed to persist agent log', { role, error: (e as Error).message });
   }
 
-  // Strip prose before/after JSON
-  const jsonStart = raw.indexOf('{');
-  const jsonEnd = raw.lastIndexOf('}');
-  if (jsonStart === -1 || jsonEnd === -1) {
-    throw new Error(`[${role}] No JSON in response: ${raw.slice(0, 300)}`);
-  }
-  const cleaned = raw.slice(jsonStart, jsonEnd + 1);
+  // P3.1: Parse + validate with Zod; one repair retry on failure.
+  return parseAndValidate<T>(role, raw, payload, fullSystemPrompt, model, incidentId);
+}
 
-  try {
-    return JSON.parse(cleaned) as T;
-  } catch {
-    // One retry with explicit correction
-    const retryController = new AbortController();
-    const retryTimeout = setTimeout(() => retryController.abort(), AGENT_TIMEOUT_MS);
-    try {
-      const retry = await anthropic.messages.create(
-        {
-          model,
-          max_tokens: 8192,
-          system: fullSystemPrompt,
-          messages: [
-            { role: 'user', content: JSON.stringify(payload) },
-            { role: 'assistant', content: raw },
-            { role: 'user', content: 'Return only valid JSON. No other text.' },
-          ],
-        },
-        { signal: retryController.signal }
-      );
-      clearTimeout(retryTimeout);
-      const retryBlock = retry.content[0];
-      const r = retryBlock && retryBlock.type === 'text' ? retryBlock.text : '';
-      const rs = r.indexOf('{');
-      const re = r.lastIndexOf('}');
-      if (rs === -1) throw new Error(`[${role}] Retry failed to produce JSON`);
-      return JSON.parse(r.slice(rs, re + 1)) as T;
-    } finally {
-      clearTimeout(retryTimeout);
-    }
+async function parseAndValidate<T>(
+  role: AgentRole,
+  raw: string,
+  originalPayload: object,
+  systemPrompt: string,
+  model: string,
+  incidentId: string,
+  isRetry = false
+): Promise<T> {
+  const jsonStr = extractJson(raw);
+  if (!jsonStr) {
+    if (isRetry) throw new Error(`[${role}] Retry produced no JSON`);
+    return repairAndRetry<T>(role, raw, originalPayload, systemPrompt, model, incidentId, 'Response contained no JSON object');
   }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(jsonStr);
+  } catch {
+    if (isRetry) throw new Error(`[${role}] Retry produced invalid JSON`);
+    return repairAndRetry<T>(role, raw, originalPayload, systemPrompt, model, incidentId, 'Response contained invalid JSON');
+  }
+
+  const schema = AGENT_SCHEMAS[role];
+  const result = schema.safeParse(parsed);
+  if (!result.success) {
+    const zodError = result.error.toString().slice(0, 800);
+    logger.warn('Agent output failed schema validation', { role, incidentId, zodError });
+    if (isRetry) throw new Error(`[${role}] Schema validation failed after repair: ${zodError}`);
+    return repairAndRetry<T>(role, raw, originalPayload, systemPrompt, model, incidentId, `Schema errors:\n${zodError}`);
+  }
+
+  return fixRequiresApproval<T>(role, result.data as T);
+}
+
+async function repairAndRetry<T>(
+  role: AgentRole,
+  previousRaw: string,
+  originalPayload: object,
+  systemPrompt: string,
+  model: string,
+  incidentId: string,
+  errorDescription: string
+): Promise<T> {
+  logger.info('Attempting schema repair retry', { role, incidentId, errorDescription });
+
+  const controller = new AbortController();
+  const timeoutHandle = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS);
+
+  let retryRaw = '';
+  try {
+    const retry = await anthropic.messages.create(
+      {
+        model,
+        max_tokens: 8192,
+        system: systemPrompt,
+        messages: [
+          { role: 'user', content: JSON.stringify(originalPayload) },
+          { role: 'assistant', content: previousRaw },
+          {
+            role: 'user',
+            content: `Your previous response had the following issues:\n\n${errorDescription}\n\nReturn only valid JSON that fixes these issues. No prose, no markdown.`,
+          },
+        ],
+      },
+      { signal: controller.signal }
+    );
+    clearTimeout(timeoutHandle);
+    const block = retry.content[0];
+    retryRaw = block && block.type === 'text' ? block.text : '';
+  } catch (err) {
+    clearTimeout(timeoutHandle);
+    throw new Error(`[${role}] Repair retry API call failed: ${(err as Error).message}`);
+  }
+
+  return parseAndValidate<T>(role, retryRaw, originalPayload, systemPrompt, model, incidentId, true);
 }
