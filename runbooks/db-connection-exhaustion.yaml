@@ -1,0 +1,40 @@
+id: db-connection-exhaustion
+title: Database Connection Pool Exhaustion
+triggers:
+  categories:
+    - database
+  services: []
+  keywords:
+    - connection pool
+    - too many connections
+    - connection refused
+    - pg_stat_activity
+    - idle connections
+steps:
+  - title: Identify long-running / idle connections
+    action: Query pg_stat_activity to identify connections consuming pool slots
+    command: "psql -c \"SELECT pid, state, now() - state_change AS duration, left(query, 80) FROM pg_stat_activity WHERE state != 'active' ORDER BY duration DESC LIMIT 20;\""
+    tool: postgres
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: List of idle connections with duration
+    timeout_seconds: 30
+
+  - title: Terminate idle connections older than 10 minutes
+    action: Kill idle connections held longer than 10 minutes to free pool slots
+    command: "psql -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE state = 'idle' AND now() - state_change > interval '10 minutes';\""
+    tool: postgres
+    risk_level: medium
+    requires_approval: true
+    rollback_command: null
+    expected_outcome: Idle connections terminated; pool usage drops
+    timeout_seconds: 30
+
+  - title: Check pod restart count after pool recovery
+    action: Verify pods have stabilised following connection pool relief
+    command: "kubectl get pods -n {{namespace}} -l app={{service}}"
+    tool: kubectl
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: All pods Running without recent restarts
+    timeout_seconds: 20

@@ -1,0 +1,51 @@
+id: crashloop-oom
+title: CrashLoopBackOff / OOMKilled Pods
+triggers:
+  categories:
+    - infrastructure
+  services: []
+  keywords:
+    - CrashLoopBackOff
+    - OOMKilled
+    - OOM
+    - crash loop
+    - pod restart
+    - memory limit
+steps:
+  - title: Describe crashing pod
+    action: Get detailed reason for crashes (OOM, liveness probe, etc.)
+    command: "kubectl describe pod -l app={{service}} -n {{namespace}}"
+    tool: kubectl
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: Last termination reason visible (OOMKilled / Error / signal)
+    timeout_seconds: 20
+
+  - title: Tail recent logs from crashing pod
+    action: Retrieve last 200 lines to identify the error before crash
+    command: "kubectl logs deploy/{{service}} -n {{namespace}} --tail=200 --previous"
+    tool: kubectl
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: Stack trace or OOM message identifying root cause
+    timeout_seconds: 30
+
+  - title: Scale down to 1 replica to reduce blast radius
+    action: Reduce replica count so only one pod is crashing while investigation continues
+    command: "kubectl scale deploy/{{service}} --replicas=1 -n {{namespace}}"
+    tool: kubectl
+    risk_level: medium
+    requires_approval: true
+    rollback_command: "kubectl scale deploy/{{service}} --replicas=3 -n {{namespace}}"
+    expected_outcome: Pod count reduced; total crash frequency drops
+    timeout_seconds: 30
+
+  - title: Restart deployment (clear transient crash state)
+    action: Trigger a rolling restart; combined with scale-up after fix
+    command: "kubectl rollout restart deploy/{{service}} -n {{namespace}}"
+    tool: kubectl
+    risk_level: medium
+    requires_approval: true
+    rollback_command: "kubectl rollout undo deploy/{{service}} -n {{namespace}}"
+    expected_outcome: Fresh pods start without crash; monitor for recurrence
+    timeout_seconds: 60

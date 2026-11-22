@@ -269,3 +269,26 @@ export async function getIncidentGithubIssueUrl(incidentId: string): Promise<str
   );
   return result.rows[0]?.github_issue_url ?? null;
 }
+
+export async function saveCheckpoint(
+  incidentId: string,
+  stage: string,
+  state: unknown
+): Promise<void> {
+  await query(
+    `UPDATE incidents SET stage = $1, state = $2 WHERE incident_id = $3`,
+    [stage, JSON.stringify(state), incidentId]
+  );
+}
+
+export async function loadCheckpoint(
+  incidentId: string
+): Promise<{ stage: string; state: unknown } | null> {
+  const result = await query<{ stage: string | null; state: unknown }>(
+    `SELECT stage, state FROM incidents WHERE incident_id = $1`,
+    [incidentId]
+  );
+  const row = result.rows[0];
+  if (!row?.stage || !row.state) return null;
+  return { stage: row.stage, state: row.state };
+}

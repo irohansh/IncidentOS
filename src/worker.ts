@@ -6,9 +6,11 @@
 import 'dotenv/config';
 import { getPool, closePool, query } from './lib/db';
 import { runIncident } from './orchestrator';
+import { loadCheckpoint } from './lib/incidentStore';
+import { loadRunbookLibrary } from './lib/runbookLibrary';
 import { validateEnv } from './lib/env';
 import { logger } from './lib/logger';
-import type { AlertPayload } from './types/incident';
+import type { AlertPayload, IncidentState } from './types/incident';
 
 validateEnv();
 
@@ -112,8 +114,20 @@ async function processJob(job: { id: string; incident_id: string; attempts: numb
     return;
   }
 
+  // P3.3: Load checkpoint so a restarted worker resumes from the last saved stage.
+  let savedState: IncidentState | undefined;
   try {
-    await runIncident(alert);
+    const cp = await loadCheckpoint(job.incident_id);
+    if (cp) {
+      savedState = cp.state as IncidentState;
+      logger.info('Resuming from checkpoint', { jobId: job.id, incident_id: job.incident_id, stage: cp.stage });
+    }
+  } catch (err) {
+    logger.warn('Failed to load checkpoint — starting fresh', { error: (err as Error).message });
+  }
+
+  try {
+    await runIncident(alert, savedState);
     await completeJob(job.id, true);
     logger.info('Job completed', { jobId: job.id, incident_id: job.incident_id });
   } catch (err) {
@@ -175,6 +189,14 @@ async function shutdown(signal: string): Promise<void> {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
+
+// Validate runbook library at startup — invalid YAML fails fast.
+try {
+  loadRunbookLibrary();
+} catch (err) {
+  logger.error('Runbook library validation failed — refusing to start', { error: (err as Error).message });
+  process.exit(1);
+}
 
 logger.info('Worker started', { workerId: WORKER_ID, concurrency: CONCURRENCY });
 pollLoop().catch((err) => {

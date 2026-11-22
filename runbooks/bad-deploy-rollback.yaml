@@ -1,0 +1,40 @@
+id: bad-deploy-rollback
+title: Bad Deploy — Rollback Deployment
+triggers:
+  categories:
+    - deployment
+  services: []
+  keywords:
+    - deploy
+    - rollback
+    - regression
+    - new version
+    - error rate spike after deploy
+steps:
+  - title: Check rollout history
+    action: Review the last two revisions to confirm which is the bad deploy
+    command: "kubectl rollout history deploy/{{service}} -n {{namespace}}"
+    tool: kubectl
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: Revision list showing current and previous versions
+    timeout_seconds: 20
+
+  - title: Rollback to previous revision
+    action: Roll back the deployment to the last known-good revision
+    command: "kubectl rollout undo deploy/{{service}} -n {{namespace}}"
+    tool: kubectl
+    risk_level: high
+    requires_approval: true
+    rollback_command: "kubectl rollout undo deploy/{{service}} -n {{namespace}}"
+    expected_outcome: Deployment rolls back; error rate drops within 60 seconds
+    timeout_seconds: 120
+
+  - title: Verify rollout status
+    action: Confirm the rollback completed successfully
+    command: "kubectl rollout status deploy/{{service}} -n {{namespace}}"
+    tool: kubectl
+    risk_level: safe
+    requires_approval: false
+    expected_outcome: Rollout complete; all pods on previous revision
+    timeout_seconds: 60
